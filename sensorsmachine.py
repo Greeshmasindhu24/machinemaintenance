@@ -68,19 +68,23 @@ st.markdown("### 🔍 Ask the Maintenance System Anything")
 query = st.text_input("Type your query below...")
 query_button = st.button("Get Response")
 
-if query_button and query:
+if query:
+    # Search for relevant documents
     query_embedding = embedding_model.encode([query])
     D, I = index.search(query_embedding, k=3)
     retrieved_docs = [docs[i] for i in I[0]]
     context = " ".join(retrieved_docs)
+
+    # RAG model inference
     prompt = f"Context: {context} \n\nQuestion: {query} \nAnswer:"
-   response = rag_model(prompt, max_length=100, do_sample=True, top_p=0.9, temperature=0.7)[0]["generated_text"]
+    response = rag_model(prompt, max_length=100, do_sample=True, top_p=0.9, temperature=0.7)[0]["generated_text"]
 
-
+    # Display results
     st.markdown("### 📖 Retrieved Context")
     st.write(context)
     st.markdown("### 🤖 Answer")
     st.write(response)
+
 
 # ---------- Anomaly Alerts ----------
 def detect_anomalies(sensor_data):
