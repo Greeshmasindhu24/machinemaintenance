@@ -1,0 +1,51 @@
+machine_id,failure_date,failure_type,failure_description
+M008,2024-10-12,Sensor fault,Sensor readings were erratic and inaccurate.
+M018,2024-01-01,Belt wear,Worn-out belt caused reduced machine efficiency.
+M012,2023-10-14,Overheating,Cooling system malfunction led to high temperature.
+M009,2023-09-12,Overheating,Cooling system malfunction led to high temperature.
+M003,2023-10-28,Vibration anomaly,Misalignment caused excessive vibration.
+M007,2023-10-17,Vibration anomaly,Misalignment caused excessive vibration.
+M019,2025-03-24,Motor failure,Motor burned out due to overheating.
+M016,2023-12-11,Sensor fault,Sensor readings were erratic and inaccurate.
+M014,2025-02-22,Sensor fault,Sensor readings were erratic and inaccurate.
+M009,2023-07-22,Vibration anomaly,Misalignment caused excessive vibration.
+M010,2025-02-03,Sensor fault,Sensor readings were erratic and inaccurate.
+M004,2024-04-24,Vibration anomaly,Misalignment caused excessive vibration.
+M014,2023-10-28,Belt wear,Worn-out belt caused reduced machine efficiency.
+M002,2024-02-09,Belt wear,Worn-out belt caused reduced machine efficiency.
+M010,2024-02-16,Sensor fault,Sensor readings were erratic and inaccurate.
+M001,2024-11-04,Vibration anomaly,Misalignment caused excessive vibration.
+M016,2024-04-04,Sensor fault,Sensor readings were erratic and inaccurate.
+M015,2023-07-04,Motor failure,Motor burned out due to overheating.
+M007,2024-07-09,Overheating,Cooling system malfunction led to high temperature.
+M009,2024-08-14,Motor failure,Motor burned out due to overheating.
+M019,2024-10-24,Motor failure,Motor burned out due to overheating.
+M003,2024-12-06,Vibration anomaly,Misalignment caused excessive vibration.
+M007,2023-09-11,Sensor fault,Sensor readings were erratic and inaccurate.
+M015,2024-08-29,Sensor fault,Sensor readings were erratic and inaccurate.
+M013,2025-03-09,Overheating,Cooling system malfunction led to high temperature.
+M017,2024-12-04,Belt wear,Worn-out belt caused reduced machine efficiency.
+M020,2025-01-18,Overheating,Cooling system malfunction led to high temperature.
+M019,2023-11-21,Sensor fault,Sensor readings were erratic and inaccurate.
+M018,2024-02-24,Overheating,Cooling system malfunction led to high temperature.
+M008,2025-02-21,Sensor fault,Sensor readings were erratic and inaccurate.
+M015,2025-01-11,Vibration anomaly,Misalignment caused excessive vibration.
+M006,2023-05-23,Vibration anomaly,Misalignment caused excessive vibration.
+M015,2025-03-16,Overheating,Cooling system malfunction led to high temperature.
+M020,2025-02-10,Vibration anomaly,Misalignment caused excessive vibration.
+M007,2024-02-23,Overheating,Cooling system malfunction led to high temperature.
+M012,2024-11-18,Sensor fault,Sensor readings were erratic and inaccurate.
+M018,2024-05-14,Belt wear,Worn-out belt caused reduced machine efficiency.
+M004,2025-03-11,Sensor fault,Sensor readings were erratic and inaccurate.
+M005,2024-11-19,Vibration anomaly,Misalignment caused excessive vibration.
+M008,2024-08-27,Vibration anomaly,Misalignment caused excessive vibration.
+M018,2024-08-17,Belt wear,Worn-out belt caused reduced machine efficiency.
+M011,2024-11-25,Belt wear,Worn-out belt caused reduced machine efficiency.
+M014,2024-07-13,Belt wear,Worn-out belt caused reduced machine efficiency.
+M017,2023-09-11,Belt wear,Worn-out belt caused reduced machine efficiency.
+M008,2023-05-03,Overheating,Cooling system malfunction led to high temperature.
+M015,2024-04-02,Sensor fault,Sensor readings were erratic and inaccurate.
+M008,2025-02-13,Sensor fault,Sensor readings were erratic and inaccurate.
+M009,2024-07-25,Overheating,Cooling system malfunction led to high temperature.
+M006,2024-08-25,Sensor fault,Sensor readings were erratic and inaccurate.
+M011,2024-04-12,Overheating,Cooling system malfunction led to high temperature.
