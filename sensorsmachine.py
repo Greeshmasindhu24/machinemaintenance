@@ -46,11 +46,15 @@ with st.expander("⚠️ Failure Data"):
 # ---------- RAG Setup ----------
 docs = [
     "CNC machines require routine maintenance to prevent breakdowns.",
-    "Vibration sensors help detect anomalies in machine performance.",
-    "Humidity affects machine accuracy and lifespan.",
-    "Scheduled maintenance reduces downtime and improves efficiency.",
-    "Predictive maintenance relies on real-time sensor data.",
+    "Vibration sensors help detect misalignment and imbalance in motors.",
+    "Humidity control in CNC environments helps prevent rusting and circuit failures.",
+    "Scheduled maintenance includes lubrication, part inspection, and calibration.",
+    "Predictive maintenance uses historical and real-time data to forecast failures.",
+    "Overheating in spindles can lead to machine downtime if not detected early.",
+    "Replacing filters and cleaning coolant systems are critical monthly tasks.",
+    "AI models analyze vibration trends to identify early-stage bearing failure.",
 ]
+
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 embedding_model.to(torch.device("cpu"))
@@ -66,11 +70,12 @@ query_button = st.button("Get Response")
 
 if query_button and query:
     query_embedding = embedding_model.encode([query])
-    D, I = index.search(query_embedding, k=2)
+    D, I = index.search(query_embedding, k=3)
     retrieved_docs = [docs[i] for i in I[0]]
     context = " ".join(retrieved_docs)
     prompt = f"Context: {context} \n\nQuestion: {query} \nAnswer:"
-    response = rag_model(prompt, max_length=100, do_sample=False)[0]["generated_text"]
+   response = rag_model(prompt, max_length=100, do_sample=True, top_p=0.9, temperature=0.7)[0]["generated_text"]
+
 
     st.markdown("### 📖 Retrieved Context")
     st.write(context)
