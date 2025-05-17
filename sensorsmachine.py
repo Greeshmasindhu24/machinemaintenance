@@ -55,8 +55,8 @@ docs = [
     "AI models analyze vibration trends to identify early-stage bearing failure.",
 ]
 
-
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+device = "cpu"  
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2",device=device)
 embedding_model.to(torch.device("cpu"))
 doc_embeddings = embedding_model.encode(docs)
 index = faiss.IndexFlatL2(doc_embeddings[0].shape[0])
