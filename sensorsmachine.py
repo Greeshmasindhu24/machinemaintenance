@@ -9,6 +9,17 @@ from reportlab.pdfgen import canvas
 import datetime
 import random
 
+# ---------- Anomaly Detection Agent Class ----------
+class AnomalyDetectionAgent:
+    def __init__(self, vibration_threshold=5.0):
+        self.vibration_threshold = vibration_threshold
+
+    def detect(self, sensor_data):
+        vibration = sensor_data.get('vibration', 0)
+        if vibration > self.vibration_threshold:
+            return True, f"Vibration spike detected at {vibration} g, potential misalignment."
+        return False, ""
+
 # ---------- Title and Sidebar ----------
 st.title("🛠️ CNC Predictive Maintenance - Multi-Agent System")
 
@@ -52,11 +63,11 @@ docs = [
     "Predictive maintenance uses historical and real-time data to forecast failures.",
     "Overheating in spindles can lead to machine downtime if not detected early.",
     "Replacing filters and cleaning coolant systems are critical monthly tasks.",
-    "AI models analyze vibration trends to identify early-stage bearing failure.",
+    "AI models analyze vibration trends to identify early-stage bearing failure."
 ]
 
-device = "cpu"  
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2",device=device)
+device = "cpu"
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
 embedding_model.to(torch.device("cpu"))
 doc_embeddings = embedding_model.encode(docs)
 index = faiss.IndexFlatL2(doc_embeddings[0].shape[0])
@@ -69,31 +80,23 @@ query = st.text_input("Type your query below...")
 query_button = st.button("Get Response")
 
 if query:
-    # Search for relevant documents
     query_embedding = embedding_model.encode([query])
     D, I = index.search(query_embedding, k=3)
     retrieved_docs = [docs[i] for i in I[0]]
     context = " ".join(retrieved_docs)
 
-    # RAG model inference
     prompt = f"Context: {context} \n\nQuestion: {query} \nAnswer:"
     response = rag_model(prompt, max_length=100, do_sample=True, top_p=0.9, temperature=0.7)[0]["generated_text"]
 
-    # Display results
     st.markdown("### 📖 Retrieved Context")
     st.write(context)
     st.markdown("### 🤖 Answer")
     st.write(response)
 
-
-# ---------- Anomaly Alerts ----------
-def detect_anomalies(sensor_data):
-    if sensor_data['vibration'] > 5.0:
-        return True, f"Vibration spike detected at {sensor_data['vibration']} g, potential misalignment"
-    return False, ""
-
+# ---------- Anomaly Alerts Using Agent ----------
 example_sensor = {'vibration': 5.2, 'temperature': 50}
-alert, alert_msg = detect_anomalies(example_sensor)
+anomaly_agent = AnomalyDetectionAgent()
+alert, alert_msg = anomaly_agent.detect(example_sensor)
 
 if alert:
     st.warning(f"🚨 Alert: {alert_msg}")
@@ -127,7 +130,7 @@ st.markdown("### 👷 Multi-Agent Pipeline Status")
 st.success("✅ All Agents Completed Successfully!")
 st.markdown("""
 - **Sensor Data Agent:** Successfully read and preprocessed sensor data.
-- **Anomaly Detection Agent:** Applied LSTMs and Autoencoders to detect anomalies.
+- **Anomaly Detection Agent:** Applied rule-based check to detect anomalies.
 - **Maintenance Scheduling Agent:** Optimized and scheduled maintenance tasks.
 - **Alert Notification Agent:** Sent real-time alerts and recommendations to the technician.
 """)
