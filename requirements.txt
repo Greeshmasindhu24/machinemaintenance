@@ -4,3 +4,5 @@ torch
 sentence-transformers
 transformers
 reportlab
+PyMuPDF
+
