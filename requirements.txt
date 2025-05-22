@@ -1,13 +1,10 @@
 streamlit
 pandas
 numpy
+torch
+tensorflow
 scikit-learn
-matplotlib
-seaborn
-tensorflow-cpu==2.13.0
-torch==2.0.0
 sentence-transformers
 langchain
 faiss-cpu
 PyPDF2
-openpyxl
