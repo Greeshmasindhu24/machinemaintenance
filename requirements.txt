@@ -2,7 +2,7 @@ streamlit
 pandas
 numpy
 torch
-tensorflow
+tensorflow-gpu
 scikit-learn
 sentence-transformers
 langchain
