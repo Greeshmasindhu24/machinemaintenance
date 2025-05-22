@@ -51,7 +51,8 @@ else:
 
 DEVICE = 0 if torch.cuda.is_available() else -1
 rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+embed_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
 
 # ------------------- ANOMALY DETECTION -------------------
 if section == "Anomaly Detection":
