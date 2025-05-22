@@ -20,7 +20,6 @@ failure_records_file = st.sidebar.file_uploader("Failure Records CSV", type=["cs
 # ------------------- SIDEBAR -------------------
 st.sidebar.title("Navigation")
 section = st.sidebar.radio("Go to", [
-    # Removed "Sensor Dashboard"
     "Anomaly Detection",
     "Maintenance Logs",
     "Failure Reports",
@@ -128,10 +127,23 @@ elif section == "RAG Q&A (PDF)":
             D, I = index.search(query_embedding, k=3)
             retrieved_docs = [chunks[i] for i in I[0]]
             context = " ".join(retrieved_docs)
-            prompt = f"Answer the question based on the context below:\nContext: {context}\n\nQuestion: {user_query}\nAnswer:"
+
+            prompt = (
+                f"Read the context below and provide a detailed, well-explained paragraph answer.\n"
+                f"Context: {context}\n\n"
+                f"Question: {user_query}\n"
+                f"Answer in a detailed paragraph:"
+            )
 
             try:
-                response = rag_model(prompt, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+                response = rag_model(
+                    prompt,
+                    max_length=300,
+                    do_sample=False,  # deterministic for more coherent text
+                    temperature=0.3,
+                    top_p=0.95,
+                    num_return_sequences=1
+                )[0]['generated_text']
                 st.success("✅ Answer:")
                 st.write(response)
             except Exception as e:
@@ -150,10 +162,22 @@ elif section == "RAG Q&A (PDF)":
                 D2, I2 = index.search(query_embedding2, k=3)
                 retrieved_docs2 = [chunks[i] for i in I2[0]]
                 context2 = " ".join(retrieved_docs2)
-                prompt2 = f"Answer the question based on the context below:\nContext: {context2}\n\nQuestion: {user_query2}\nAnswer:"
+                prompt2 = (
+                    f"Read the context below and provide a detailed, well-explained paragraph answer.\n"
+                    f"Context: {context2}\n\n"
+                    f"Question: {user_query2}\n"
+                    f"Answer in a detailed paragraph:"
+                )
 
                 try:
-                    response2 = rag_model(prompt2, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+                    response2 = rag_model(
+                        prompt2,
+                        max_length=300,
+                        do_sample=False,
+                        temperature=0.3,
+                        top_p=0.95,
+                        num_return_sequences=1
+                    )[0]['generated_text']
                     st.session_state.auto_response = response2
                 except Exception as e:
                     st.error("❌ Error generating auto response.")
