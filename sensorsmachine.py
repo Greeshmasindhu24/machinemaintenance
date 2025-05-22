@@ -1,192 +1,110 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import torch
 from transformers import pipeline
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
 import faiss
 
-# ------------------- CONFIG -------------------
+# ---------------- CONFIG ----------------
 st.set_page_config(page_title="CNC Predictive Maintenance", layout="wide")
-st.title("🛠️ CNC Predictive Maintenance using Vibration & Humidity Sensors")
+st.title("🤖 Multi-Agent CNC Predictive Maintenance System")
 st.markdown("---")
 
-# ------------------- UPLOAD DATA -------------------
-st.sidebar.title("Upload Data Files")
-sensor_data_file = st.sidebar.file_uploader("Sensor Data CSV", type=["csv"], key="sensor")
-maintenance_logs_file = st.sidebar.file_uploader("Maintenance Logs CSV", type=["csv"], key="maintenance")
-failure_records_file = st.sidebar.file_uploader("Failure Records CSV", type=["csv"], key="failure")
+# ---------------- FILE UPLOADS ----------------
+st.sidebar.title("📂 Upload Data")
+sensor_file = st.sidebar.file_uploader("Sensor Data CSV", type="csv", key="sensor")
+maint_file = st.sidebar.file_uploader("Maintenance Logs CSV", type="csv", key="maint")
+failure_file = st.sidebar.file_uploader("Failure Records CSV", type="csv", key="fail")
+pdf_file = st.sidebar.file_uploader("Maintenance Manual PDF", type="pdf", key="pdf")
 
-# ------------------- SIDEBAR -------------------
-st.sidebar.title("Navigation")
-section = st.sidebar.radio("Go to", [
-    "Anomaly Detection",
-    "Maintenance Logs",
-    "Failure Reports",
-    "Download Report",
-    "RAG Q&A (PDF)"
-])
+if not (sensor_file and maint_file and failure_file):
+    st.warning("Please upload all three required data files to proceed.")
+    st.stop()
 
-# Only enforce file uploads for sections other than RAG Q&A
-if section != "RAG Q&A (PDF)":
-    if not (sensor_data_file and maintenance_logs_file and failure_records_file):
-        st.sidebar.warning("📂 Please upload all three required data files to proceed.")
-        st.stop()
+# ---------------- LOAD DATA ----------------
+sensor_df = pd.read_csv(sensor_file)
+maint_df = pd.read_csv(maint_file)
+failure_df = pd.read_csv(failure_file)
 
-# Read uploaded files if available (skip if missing but in RAG section)
-if sensor_data_file:
-    sensor_data_df = pd.read_csv(sensor_data_file)
-else:
-    sensor_data_df = pd.DataFrame()
+# ---------------- MODELS ----------------
+device = 0 if torch.cuda.is_available() else -1
+rag_model = pipeline("text2text-generation", model="t5-base", device=device)
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-if maintenance_logs_file:
-    maintenance_logs_df = pd.read_csv(maintenance_logs_file)
-else:
-    maintenance_logs_df = pd.DataFrame()
+# ---------------- AGENTS ----------------
 
-if failure_records_file:
-    failure_records_df = pd.read_csv(failure_records_file)
-else:
-    failure_records_df = pd.DataFrame()
-
-DEVICE = 0 if torch.cuda.is_available() else -1
-rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
-embed_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-
-
-# ------------------- ANOMALY DETECTION -------------------
-if section == "Anomaly Detection":
-    st.header("🚨 Historical Anomaly Detection")
-    threshold_vibration = st.slider("Vibration Threshold", 0.0, 5.0, 1.5)
-    threshold_humidity = st.slider("Humidity Threshold", 0, 100, 80)
-
-    anomalies = sensor_data_df[
-        (sensor_data_df['vibration'] > threshold_vibration) |
-        (sensor_data_df['humidity'] > threshold_humidity)
-    ]
-
-    st.metric("Total Readings", len(sensor_data_df))
+def sensor_data_agent():
+    st.subheader("🔍 Sensor Data Agent")
+    vib_thresh = st.slider("Set Vibration Threshold", 0.0, 5.0, 1.5)
+    hum_thresh = st.slider("Set Humidity Threshold", 0, 100, 80)
+    anomalies = sensor_df[(sensor_df['vibration'] > vib_thresh) | (sensor_df['humidity'] > hum_thresh)]
+    st.metric("Total Readings", len(sensor_df))
     st.metric("Anomalies Detected", len(anomalies))
-    st.dataframe(anomalies.tail(20))
+    return anomalies
 
-# ------------------- MAINTENANCE LOGS -------------------
-elif section == "Maintenance Logs":
-    st.header("🧾 Maintenance History")
-    st.dataframe(maintenance_logs_df)
+def maintenance_log_agent():
+    st.subheader("🧾 Maintenance Log Agent")
+    common_issues = maint_df['issue'].value_counts().head(3)
+    st.write("Most Common Maintenance Issues:", common_issues)
+    return common_issues
 
-# ------------------- FAILURE REPORTS -------------------
-elif section == "Failure Reports":
-    st.header("❌ Failure Records")
-    st.dataframe(failure_records_df)
+def failure_report_agent():
+    st.subheader("❌ Failure Report Agent")
+    fail_summary = failure_df['machine_id'].value_counts().head(3)
+    st.write("Machines with Highest Failures:", fail_summary)
+    return fail_summary
 
-# ------------------- DOWNLOAD REPORT -------------------
-elif section == "Download Report":
-    st.header("📥 Download Maintenance Health Report")
-
-    # Aggregate summary
-    machine_summary = sensor_data_df.groupby("machine_id").agg({
-        "vibration": "mean",
-        "humidity": "mean",
-        "temperature": "mean",
-        "failure": "sum"
-    }).reset_index()
-    machine_summary = machine_summary.rename(columns={"failure": "failure_count"})
-
-    st.dataframe(machine_summary)
-
-    # Downloadable CSV
-    csv = machine_summary.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📄 Download CSV Report",
-        data=csv,
-        file_name="maintenance_health_report.csv",
-        mime="text/csv"
-    )
-
-# ------------------- RAG Q&A WITH PDF -------------------
-elif section == "RAG Q&A (PDF)":
-    st.header("🤖 Ask the Maintenance Assistant (PDF Powered)")
-    uploaded_file = st.file_uploader("Upload a Maintenance Manual (PDF)", type="pdf")
-
-    if uploaded_file:
-        reader = PdfReader(uploaded_file)
+def pdf_knowledge_agent():
+    st.subheader("📄 PDF Knowledge Agent (RAG)")
+    if pdf_file:
+        reader = PdfReader(pdf_file)
         full_text = " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        st.success("📄 PDF loaded and processed successfully.")
-
-        # Chunk and embed
         chunks = [full_text[i:i+500] for i in range(0, len(full_text), 500)]
         embeddings = embed_model.encode(chunks)
-
-        # FAISS index
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
 
-        # First input box with button
-        user_query = st.text_area("Ask a question about the PDF:")
-        if st.button("Get Answer") and user_query:
+        user_query = st.text_area("Ask a question about the PDF manual:")
+        if user_query:
             query_embedding = embed_model.encode([user_query])
             D, I = index.search(query_embedding, k=3)
-            retrieved_docs = [chunks[i] for i in I[0]]
-            context = " ".join(retrieved_docs)
-
-            prompt = (
-                f"Read the context below and provide a detailed, well-explained paragraph answer.\n"
-                f"Context: {context}\n\n"
-                f"Question: {user_query}\n"
-                f"Answer in a detailed paragraph:"
-            )
-
-            try:
-                response = rag_model(
-                    prompt,
-                    max_length=300,
-                    do_sample=False,  # deterministic for more coherent text
-                    temperature=0.3,
-                    top_p=0.95,
-                    num_return_sequences=1
-                )[0]['generated_text']
-                st.success("✅ Answer:")
-                st.write(response)
-            except Exception as e:
-                st.error("❌ Error generating response.")
-                st.exception(e)
-
-        st.markdown("---")
-
-        # Second input box with auto response
-        user_query2 = st.text_input("Or try another question here (auto response):")
-
-        if user_query2:
-            if 'last_query' not in st.session_state or st.session_state.last_query != user_query2:
-                st.session_state.last_query = user_query2
-                query_embedding2 = embed_model.encode([user_query2])
-                D2, I2 = index.search(query_embedding2, k=3)
-                retrieved_docs2 = [chunks[i] for i in I2[0]]
-                context2 = " ".join(retrieved_docs2)
-                prompt2 = (
-                    f"Read the context below and provide a detailed, well-explained paragraph answer.\n"
-                    f"Context: {context2}\n\n"
-                    f"Question: {user_query2}\n"
-                    f"Answer in a detailed paragraph:"
-                )
-
-                try:
-                    response2 = rag_model(
-                        prompt2,
-                        max_length=300,
-                        do_sample=False,
-                        temperature=0.3,
-                        top_p=0.95,
-                        num_return_sequences=1
-                    )[0]['generated_text']
-                    st.session_state.auto_response = response2
-                except Exception as e:
-                    st.error("❌ Error generating auto response.")
-                    st.exception(e)
-
-            if 'auto_response' in st.session_state:
-                st.success("🤖 Auto Answer:")
-                st.write(st.session_state.auto_response)
-
+            context = " ".join([chunks[i] for i in I[0]])
+            prompt = f"Answer the question based on the context below:\nContext: {context}\n\nQuestion: {user_query}\nAnswer:"
+            response = rag_model(prompt, max_length=300, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+            st.success("Agent Response:")
+            st.write(response)
+            return response
     else:
-        st.info("📤 Upload a PDF to enable question answering.")
+        st.info("Upload a PDF manual to enable RAG Q&A.")
+        return None
+
+def decision_maker_agent(anomalies, common_issues, fail_summary, rag_response):
+    st.subheader("🧠 Decision Maker Agent")
+    suggestions = []
+    if len(anomalies) > 10:
+        suggestions.append("⚠️ High anomaly count. Schedule inspection for affected machines.")
+    if len(common_issues) > 0:
+        suggestions.append(f"🔧 Frequent issue detected: {common_issues.index[0]}.")
+    if len(fail_summary) > 0:
+        suggestions.append(f"❗ Machine {fail_summary.index[0]} has the most failures.")
+    if rag_response:
+        suggestions.append(f"📘 Based on manual: {rag_response[:200]}...")
+
+    if suggestions:
+        st.markdown("\n".join([f"- {s}" for s in suggestions]))
+    else:
+        st.write("✅ All systems appear normal.")
+
+# ---------------- MAIN APP ----------------
+st.header("🧑‍💻 Multi-Agent Dashboard")
+
+anomalies = sensor_data_agent()
+common_issues = maintenance_log_agent()
+fail_summary = failure_report_agent()
+rag_response = pdf_knowledge_agent()
+decision_maker_agent(anomalies, common_issues, fail_summary, rag_response)
+
+st.markdown("---")
+st.info("Developed by Sindhamma – Multi-Agent Predictive Maintenance")
