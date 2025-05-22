@@ -1,8 +1,7 @@
-streamlit
-faiss-cpu
-torch
+PyPDF2
 sentence-transformers
+faiss-cpu
+langchain
 transformers
-reportlab
-PyMuPDF
-
+torch
+streamlit
