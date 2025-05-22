@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import torch
 from transformers import pipeline
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
 import faiss
-from io import BytesIO
 
 # ------------------- CONFIG -------------------
 st.set_page_config(page_title="CNC Predictive Maintenance", layout="wide")
@@ -20,7 +18,7 @@ maintenance_logs_file = st.sidebar.file_uploader("Maintenance Logs CSV", type=["
 failure_records_file = st.sidebar.file_uploader("Failure Records CSV", type=["csv"], key="failure")
 
 if not (sensor_data_file and maintenance_logs_file and failure_records_file):
-    st.warning("📂 Please upload all three required data files to proceed.")
+    st.sidebar.warning("📂 Please upload all three required data files to proceed.")
     st.stop()
 
 # Read uploaded files
@@ -34,7 +32,14 @@ embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ------------------- SIDEBAR -------------------
 st.sidebar.title("Navigation")
-section = st.sidebar.radio("Go to", ["Sensor Dashboard", "Anomaly Detection", "Maintenance Logs", "Failure Reports", "Download Report", "RAG Q&A (PDF)"])
+section = st.sidebar.radio("Go to", [
+    "Sensor Dashboard",
+    "Anomaly Detection",
+    "Maintenance Logs",
+    "Failure Reports",
+    "Download Report",
+    "RAG Q&A (PDF)"
+])
 
 # ------------------- SENSOR DASHBOARD -------------------
 if section == "Sensor Dashboard":
@@ -109,7 +114,7 @@ elif section == "RAG Q&A (PDF)":
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
 
-        # First input box with button (existing)
+        # First input box with button
         user_query = st.text_area("Ask a question about the PDF:")
         if st.button("Get Answer") and user_query:
             query_embedding = embed_model.encode([user_query])
@@ -126,24 +131,31 @@ elif section == "RAG Q&A (PDF)":
                 st.error("❌ Error generating response.")
                 st.exception(e)
 
-        st.markdown("---")  # Separator
+        st.markdown("---")
 
-        # Second input box with auto-response (new)
+        # Second input box with auto response
         user_query2 = st.text_input("Or try another question here (auto response):")
-        if user_query2:
-            query_embedding2 = embed_model.encode([user_query2])
-            D2, I2 = index.search(query_embedding2, k=3)
-            retrieved_docs2 = [chunks[i] for i in I2[0]]
-            context2 = " ".join(retrieved_docs2)
-            prompt2 = f"Answer the question based on the context below:\nContext: {context2}\n\nQuestion: {user_query2}\nAnswer:"
 
-            try:
-                response2 = rag_model(prompt2, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+        # Use session_state to avoid unnecessary re-computation and flickering
+        if user_query2:
+            if 'last_query' not in st.session_state or st.session_state.last_query != user_query2:
+                st.session_state.last_query = user_query2
+                query_embedding2 = embed_model.encode([user_query2])
+                D2, I2 = index.search(query_embedding2, k=3)
+                retrieved_docs2 = [chunks[i] for i in I2[0]]
+                context2 = " ".join(retrieved_docs2)
+                prompt2 = f"Answer the question based on the context below:\nContext: {context2}\n\nQuestion: {user_query2}\nAnswer:"
+
+                try:
+                    response2 = rag_model(prompt2, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+                    st.session_state.auto_response = response2
+                except Exception as e:
+                    st.error("❌ Error generating auto response.")
+                    st.exception(e)
+
+            if 'auto_response' in st.session_state:
                 st.success("🤖 Auto Answer:")
-                st.write(response2)
-            except Exception as e:
-                st.error("❌ Error generating auto response.")
-                st.exception(e)
+                st.write(st.session_state.auto_response)
 
     else:
         st.info("📤 Upload a PDF to enable question answering.")
