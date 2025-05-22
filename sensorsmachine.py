@@ -1,42 +1,45 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import torch
 from transformers import pipeline
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
 import faiss
+from io import StringIO
 
-# Initialize models once
-DEVICE = 0 if torch.cuda.is_available() else -1
-rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+# --- SET PAGE CONFIG FIRST ---
+st.set_page_config(page_title="🛠️ CNC Predictive Maintenance Multi-Agent", layout="wide")
 
-# ----------------- LOAD EXCEL FILES FROM PATH -----------------
+# --- LOAD DATA ---
 
-# TODO: Replace these with your actual Excel file paths
-# Replace with your actual file paths
 sensor_data_path = r"F:\SindhuReddy\AIAgents\sensor_data.csv"
 maintenance_logs_path = r"F:\SindhuReddy\AIAgents\maintenance_logs.csv"
 failure_records_path = r"F:\SindhuReddy\AIAgents\failure_records.csv"
 
+sensor_data_df = pd.read_csv(sensor_data_path)
+maintenance_logs_df = pd.read_csv(maintenance_logs_path)
+failure_records_df = pd.read_csv(failure_records_path)
+
 try:
-    sensor_data_df = pd.read_excel(sensor_data_path)
+    sensor_data_df = pd.read_csv(sensor_data_path)
 except Exception as e:
     sensor_data_df = pd.DataFrame()
-    st.error(f"Failed to load sensor data Excel from {sensor_data_path}: {e}")
+    st.error(f"Failed to load sensor data CSV from {sensor_data_path}: {e}")
 
 try:
-    maintenance_logs_df = pd.read_excel(maintenance_logs_path)
+    maintenance_logs_df = pd.read_csv(maintenance_logs_path)
 except Exception as e:
     maintenance_logs_df = pd.DataFrame()
-    st.error(f"Failed to load maintenance logs Excel from {maintenance_logs_path}: {e}")
+    st.error(f"Failed to load maintenance logs CSV from {maintenance_logs_path}: {e}")
 
 try:
-    failure_records_df = pd.read_excel(failure_records_path)
+    failure_records_df = pd.read_csv(failure_records_path)
 except Exception as e:
     failure_records_df = pd.DataFrame()
-    st.error(f"Failed to load failure records Excel from {failure_records_path}: {e}")
+    st.error(f"Failed to load failure records CSV from {failure_records_path}: {e}")
 
+# ... continue with your app code ...
 # ---------------- AGENTS ----------------
 
 def sensor_data_agent(query: str) -> str:
