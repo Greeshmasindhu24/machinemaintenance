@@ -1,50 +1,40 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import torch
 from transformers import pipeline
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
 import faiss
-from io import StringIO
 
-# --- SET PAGE CONFIG FIRST ---
-st.set_page_config(page_title="🛠️ CNC Predictive Maintenance Multi-Agent", layout="wide")
+# Define relative file paths
+sensor_data_path = "data/sensor_data.csv"
+maintenance_logs_path = "data/maintenance_logs.csv"
+failure_records_path = "data/failure_records.csv"
 
-# --- LOAD DATA ---
-
-sensor_data_path = r"F:\SindhuReddy\AIAgents\sensor_data.csv"
-maintenance_logs_path = r"F:\SindhuReddy\AIAgents\maintenance_logs.csv"
-failure_records_path = r"F:\SindhuReddy\AIAgents\failure_records.csv"
-
-sensor_data_df = pd.read_csv(sensor_data_path)
-maintenance_logs_df = pd.read_csv(maintenance_logs_path)
-failure_records_df = pd.read_csv(failure_records_path)
-
+# Load CSVs into DataFrames with error handling
 try:
     sensor_data_df = pd.read_csv(sensor_data_path)
-except Exception as e:
-    sensor_data_df = pd.DataFrame()
-    st.error(f"Failed to load sensor data CSV from {sensor_data_path}: {e}")
+except FileNotFoundError:
+    st.error(f"Failed to load sensor data CSV from {sensor_data_path}. Please ensure the file exists.")
 
 try:
     maintenance_logs_df = pd.read_csv(maintenance_logs_path)
-except Exception as e:
-    maintenance_logs_df = pd.DataFrame()
-    st.error(f"Failed to load maintenance logs CSV from {maintenance_logs_path}: {e}")
+except FileNotFoundError:
+    st.error(f"Failed to load maintenance logs CSV from {maintenance_logs_path}. Please ensure the file exists.")
 
 try:
     failure_records_df = pd.read_csv(failure_records_path)
-except Exception as e:
-    failure_records_df = pd.DataFrame()
-    st.error(f"Failed to load failure records CSV from {failure_records_path}: {e}")
+except FileNotFoundError:
+    st.error(f"Failed to load failure records CSV from {failure_records_path}. Please ensure the file exists.")
 
-# ... continue with your app code ...
+# Initialize models once
+DEVICE = 0 if torch.cuda.is_available() else -1
+rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+
 # ---------------- AGENTS ----------------
 
 def sensor_data_agent(query: str) -> str:
-    if sensor_data_df.empty:
-        return f"Sensor data is not loaded. Please check the path: {sensor_data_path}"
     query = query.lower()
     if "anomaly" in query or "threshold" in query:
         vib_thresh = 1.5
@@ -67,8 +57,6 @@ def sensor_data_agent(query: str) -> str:
         return "Please ask about anomalies or averages related to sensor data."
 
 def maintenance_log_agent(query: str) -> str:
-    if maintenance_logs_df.empty:
-        return f"Maintenance log data is not loaded. Please check the path: {maintenance_logs_path}"
     query = query.lower()
     if "common issue" in query or "frequent issue" in query:
         if 'issue' in maintenance_logs_df.columns:
@@ -85,8 +73,6 @@ def maintenance_log_agent(query: str) -> str:
         return "You can ask about common issues or recent maintenance actions."
 
 def failure_record_agent(query: str) -> str:
-    if failure_records_df.empty:
-        return f"Failure record data is not loaded. Please check the path: {failure_records_path}"
     query = query.lower()
     if "failure count" in query:
         counts = failure_records_df['machine_id'].value_counts()
@@ -101,9 +87,10 @@ def failure_record_agent(query: str) -> str:
 # ----------------- STREAMLIT APP -----------------
 
 st.set_page_config(page_title="🛠️ CNC Predictive Maintenance Multi-Agent", layout="wide")
-st.title("🛠️ CNC Predictive Maintenance using Excel Files")
+st.title("🛠️ CNC Predictive Maintenance using Embedded Data and Multi-Agents")
 st.markdown("---")
 
+# Sidebar navigation
 agent_choice = st.sidebar.selectbox("Select Agent", [
     "Sensor Data Agent",
     "Maintenance Log Agent",
@@ -127,6 +114,7 @@ if agent_choice != "RAG Q&A (PDF Manual)":
             st.markdown("### Response:")
             st.write(response)
 else:
+    # RAG Q&A agent with PDF upload
     st.header("🤖 Ask the Maintenance Manual (PDF Powered)")
     uploaded_file = st.file_uploader("Upload a Maintenance Manual (PDF)", type="pdf")
     if uploaded_file:
@@ -134,9 +122,11 @@ else:
         full_text = " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
         st.success("📄 PDF loaded and processed successfully.")
 
+        # Split into chunks of 500 chars
         chunks = [full_text[i:i+500] for i in range(0, len(full_text), 500)]
         embeddings = embed_model.encode(chunks)
 
+        # Create FAISS index
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
 
