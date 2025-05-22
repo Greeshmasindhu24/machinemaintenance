@@ -3,35 +3,67 @@ import pandas as pd
 import numpy as np
 import torch
 from transformers import pipeline
+from PyPDF2 import PdfReader
+from sentence_transformers import SentenceTransformer
+import faiss
+from langchain.text_splitter import CharacterTextSplitter
 
-# Set up the page
+# Setup
 st.set_page_config(page_title="CNC Predictive Maintenance", layout="wide")
 st.title("🛠️ CNC Predictive Maintenance using Vibration & Humidity Sensors")
 st.markdown("---")
 
-# Load the RAG Model pipeline (T5 or other)
+# Load the RAG model
 DEVICE = 0 if torch.cuda.is_available() else -1
 rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
 
-# Sidebar options
+# Sidebar
 st.sidebar.title("Navigation")
 section = st.sidebar.radio("Go to", ["Sensor Input", "Anomaly Detection", "RAG Q&A"])
 
-# Function to simulate sensor data (or load real data)
+# --- Sensor Input ---
 def get_sensor_data():
     return {
         "Vibration": round(np.random.uniform(0.1, 2.0), 2),
         "Humidity": round(np.random.uniform(30, 90), 2)
     }
 
-# Section: Sensor Input
+# --- PDF RAG Setup Functions ---
+def load_pdf_chunks(pdf_file):
+    reader = PdfReader(pdf_file)
+    text = ""
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text
+    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = splitter.split_text(text)
+    return chunks
+
+def build_vector_store(chunks):
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    embeddings = embedder.encode(chunks)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(embeddings)
+    return index, chunks, embedder
+
+def get_rag_response(query, index, chunks, embedder):
+    query_vec = embedder.encode([query])
+    top_k = 3
+    distances, indices = index.search(query_vec, top_k)
+    retrieved_docs = "\n".join([chunks[i] for i in indices[0]])
+    prompt = f"Context:\n{retrieved_docs}\n\nQuestion:\n{query}"
+    response = rag_model(prompt, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+    return response
+
+# --- Sensor Section ---
 if section == "Sensor Input":
     st.header("📡 Real-time Sensor Input")
     sensor_data = get_sensor_data()
     st.write("**Current Sensor Readings:**")
     st.json(sensor_data)
 
-# Section: Anomaly Detection (placeholder logic)
+# --- Anomaly Detection Section ---
 elif section == "Anomaly Detection":
     st.header("📊 Anomaly Detection Result")
     vibration = st.slider("Vibration Level", 0.0, 5.0, 1.0)
@@ -43,20 +75,28 @@ elif section == "Anomaly Detection":
     else:
         st.success("✅ No Anomalies Detected")
 
-# Section: RAG Q&A
+# --- RAG Q&A Section ---
 elif section == "RAG Q&A":
     st.header("🧠 Ask the Maintenance Assistant")
-    prompt = st.text_area("Enter your maintenance question here:", height=100)
+    uploaded_file = st.file_uploader("📄 Upload Maintenance Manual (PDF)", type=["pdf"])
 
-    if st.button("Get Answer") and prompt.strip() != "":
-        with st.spinner("Generating answer using RAG model..."):
-            try:
-                response = rag_model(prompt, max_length=100, do_sample=True, top_p=0.9, temperature=0.7)[0]["generated_text"]
-                st.success("✅ Answer:")
-                st.write(response)
-            except Exception as e:
-                st.error("❌ An error occurred while generating the response.")
-                st.exception(e)
+    if uploaded_file:
+        with st.spinner("Processing uploaded PDF..."):
+            chunks = load_pdf_chunks(uploaded_file)
+            index, chunk_list, embedder = build_vector_store(chunks)
+
+        user_query = st.text_area("Enter your maintenance question here:", height=100)
+
+        if st.button("Get Answer") and user_query.strip() != "":
+            with st.spinner("Generating answer using PDF-based RAG..."):
+                try:
+                    response = get_rag_response(user_query, index, chunk_list, embedder)
+                    st.success("✅ Answer:")
+                    st.write(response)
+                except Exception as e:
+                    st.error("❌ An error occurred while generating the response.")
+                    st.exception(e)
+        else:
+            st.info("💬 Enter a question above and click 'Get Answer'.")
     else:
-        st.info("💬 Enter a question above and click 'Get Answer'.")
-
+        st.warning("📥 Please upload a PDF to begin question answering.")
