@@ -1,232 +1,227 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import torch
-import torch.nn as nn
-from transformers import pipeline
-from PyPDF2 import PdfReader
+import os
+from io import StringIO, BytesIO
 from sentence_transformers import SentenceTransformer
-import faiss
-
-# ---------------- LSTM Autoencoder for anomaly detection ----------------
-
-class LSTMAutoencoder(nn.Module):
-    def __init__(self, seq_len, n_features, embedding_dim=64):
-        super(LSTMAutoencoder, self).__init__()
-        self.seq_len = seq_len
-        self.n_features = n_features
-        self.embedding_dim = embedding_dim
-        
-        self.encoder = nn.LSTM(
-            input_size=n_features, hidden_size=embedding_dim,
-            num_layers=1, batch_first=True
-        )
-        self.decoder = nn.LSTM(
-            input_size=embedding_dim, hidden_size=n_features,
-            num_layers=1, batch_first=True
-        )
-
-    def forward(self, x):
-        _, (hidden, _) = self.encoder(x)
-        hidden = hidden.repeat(self.seq_len, 1, 1).permute(1, 0, 2)
-        decoded, _ = self.decoder(hidden)
-        return decoded
-
-def detect_anomalies(sensor_df):
-    seq_len = 5
-    n_features = 3  # vibration, humidity, temperature
-    model = LSTMAutoencoder(seq_len, n_features)
-    model.eval()
-
-    data = sensor_df[['vibration', 'humidity', 'temperature']].values
-    if len(data) < seq_len:
-        return []
-
-    sequences = []
-    for i in range(len(data) - seq_len):
-        sequences.append(data[i:i+seq_len])
-    sequences = np.array(sequences)
-    sequences = torch.tensor(sequences, dtype=torch.float32)
-
-    with torch.no_grad():
-        outputs = model(sequences)
-        loss = torch.mean((outputs - sequences)**2, dim=(1,2)).numpy()
-    
-    anomalies = np.where(loss > 0.1)[0]
-    return anomalies.tolist()
-
-# ----------------- Initialization -----------------
-
-DEVICE = 0 if torch.cuda.is_available() else -1
-
-try:
-    rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
-except Exception:
-    rag_model = None
-
-try:
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-except Exception:
-    embed_model = None
-
-# ---------------- Streamlit UI -----------------
+from transformers import pipeline
+from sklearn.preprocessing import MinMaxScaler
+import torch
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, RepeatVector, TimeDistributed
+from tensorflow.keras.callbacks import EarlyStopping
+import fitz  # PyMuPDF for PDF reading
+import re
 
 st.set_page_config(page_title="🛠️ CNC Predictive Maintenance Multi-Agent", layout="wide")
-st.title("🛠️ CNC Predictive Maintenance Multi-Agent System")
-st.markdown("---")
 
-# Sidebar file uploads
-st.sidebar.header("Upload your data files")
+st.title("CNC Predictive Maintenance Multi-Agent System")
+
+# === File Upload Section ===
+st.sidebar.header("Upload Data Files")
 
 sensor_file = st.sidebar.file_uploader("Upload Sensor Data CSV", type=["csv"])
 maintenance_file = st.sidebar.file_uploader("Upload Maintenance Logs CSV", type=["csv"])
 failure_file = st.sidebar.file_uploader("Upload Failure Records CSV", type=["csv"])
-pdf_manual_file = st.sidebar.file_uploader("Upload Maintenance Manual PDF", type=["pdf"])
+pdf_manual_file = st.sidebar.file_uploader("Upload PDF Manual", type=["pdf"])
 
-sensor_data_df = None
-maintenance_logs_df = None
-failure_records_df = None
-pdf_text_chunks = []
-faiss_index = None
+# === Load Data or Placeholder ===
+@st.cache_data
+def load_csv(file):
+    if file:
+        return pd.read_csv(file)
+    else:
+        return None
 
-if sensor_file:
-    try:
-        sensor_data_df = pd.read_csv(sensor_file)
-        st.sidebar.success("Sensor data loaded")
-    except Exception as e:
-        st.sidebar.error(f"Failed to load sensor data CSV: {e}")
+sensor_data_df = load_csv(sensor_file)
+maintenance_logs_df = load_csv(maintenance_file)
+failure_records_df = load_csv(failure_file)
 
-if maintenance_file:
-    try:
-        maintenance_logs_df = pd.read_csv(maintenance_file)
-        st.sidebar.success("Maintenance logs loaded")
-    except Exception as e:
-        st.sidebar.error(f"Failed to load maintenance logs CSV: {e}")
+# PDF text extraction
+def extract_pdf_text(pdf_file) -> str:
+    if pdf_file is None:
+        return ""
+    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
 
-if failure_file:
-    try:
-        failure_records_df = pd.read_csv(failure_file)
-        st.sidebar.success("Failure records loaded")
-    except Exception as e:
-        st.sidebar.error(f"Failed to load failure records CSV: {e}")
+pdf_text = extract_pdf_text(pdf_manual_file)
+
+# === Display data summaries ===
+st.sidebar.markdown("### Data Summary")
+if sensor_data_df is not None:
+    st.sidebar.write(f"Sensor data: {sensor_data_df.shape[0]} rows, {sensor_data_df.shape[1]} columns")
+else:
+    st.sidebar.write("Sensor data: Not loaded")
+
+if maintenance_logs_df is not None:
+    st.sidebar.write(f"Maintenance logs: {maintenance_logs_df.shape[0]} rows, {maintenance_logs_df.shape[1]} columns")
+else:
+    st.sidebar.write("Maintenance logs: Not loaded")
+
+if failure_records_df is not None:
+    st.sidebar.write(f"Failure records: {failure_records_df.shape[0]} rows, {failure_records_df.shape[1]} columns")
+else:
+    st.sidebar.write("Failure records: Not loaded")
 
 if pdf_manual_file:
-    try:
-        reader = PdfReader(pdf_manual_file)
-        full_text = " ".join([page.extract_text() or "" for page in reader.pages])
-        st.sidebar.success("PDF manual loaded")
+    st.sidebar.write(f"PDF Manual uploaded: {pdf_manual_file.name}")
+else:
+    st.sidebar.write("PDF Manual: Not uploaded")
 
-        if embed_model is not None:
-            pdf_text_chunks = [full_text[i:i+500] for i in range(0, len(full_text), 500)]
-            embeddings = embed_model.encode(pdf_text_chunks)
-            faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
-            faiss_index.add(embeddings)
-        else:
-            st.sidebar.warning("SentenceTransformer model not loaded; PDF Q&A disabled.")
-    except Exception as e:
-        st.sidebar.error(f"Failed to process PDF: {e}")
+# === LSTM Autoencoder for Anomaly Detection on Sensor Data ===
+def create_autoencoder(input_dim, timesteps=10):
+    model = Sequential([
+        LSTM(64, activation='relu', input_shape=(timesteps, input_dim), return_sequences=True),
+        LSTM(32, activation='relu', return_sequences=False),
+        RepeatVector(timesteps),
+        LSTM(32, activation='relu', return_sequences=True),
+        LSTM(64, activation='relu', return_sequences=True),
+        TimeDistributed(Dense(input_dim))
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    return model
 
-# -------- Agents --------
+def preprocess_sensor_data(df, timesteps=10):
+    df_numeric = df.select_dtypes(include=[np.number]).dropna()
+    scaler = MinMaxScaler()
+    scaled = scaler.fit_transform(df_numeric)
+    X = []
+    for i in range(len(scaled) - timesteps):
+        X.append(scaled[i:i+timesteps])
+    return np.array(X), scaler
 
-def sensor_data_agent(query):
+# Train autoencoder only if sensor data is present
+if sensor_data_df is not None:
+    timesteps = 10
+    X_sensor, sensor_scaler = preprocess_sensor_data(sensor_data_df, timesteps)
+    autoencoder = create_autoencoder(X_sensor.shape[2], timesteps)
+    early_stop = EarlyStopping(monitor='loss', patience=3)
+    with st.spinner("Training autoencoder on sensor data..."):
+        autoencoder.fit(X_sensor, X_sensor, epochs=15, batch_size=32, callbacks=[early_stop], verbose=0)
+    # We do NOT show anomalies per your request
+else:
+    autoencoder = None
+
+# === SentenceTransformer Model for Embeddings ===
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+try:
+    embed_model = load_embedding_model()
+except Exception as e:
+    st.error(f"Failed loading embedding model: {e}")
+    embed_model = None
+
+# === Initialize RAG text generation model ===
+@st.cache_resource
+def load_rag_model():
+    return pipeline("text2text-generation", model="t5-small")
+
+try:
+    rag_model = load_rag_model()
+except Exception as e:
+    st.error(f"Failed loading RAG model: {e}")
+    rag_model = None
+
+# === Define agents for dataset queries ===
+def sensor_data_agent(question):
     if sensor_data_df is None:
         return "Sensor data not loaded."
-    
-    q = query.lower()
+    # Simple keyword based example (expand as needed)
+    q = question.lower()
     if "average" in q or "mean" in q:
-        vib_mean = sensor_data_df['vibration'].mean()
-        hum_mean = sensor_data_df['humidity'].mean()
-        temp_mean = sensor_data_df['temperature'].mean()
-        return f"Average vibration: {vib_mean:.2f}, humidity: {hum_mean:.2f}, temperature: {temp_mean:.2f}."
-    elif "anomaly" in q or "threshold" in q:
-        anomalies = detect_anomalies(sensor_data_df)
-        if len(anomalies) == 0:
-            return "No anomalies detected by the LSTM autoencoder."
-        else:
-            return f"Anomalies detected in {len(anomalies)} sensor data sequences."
+        try:
+            col = [c for c in sensor_data_df.columns if c.lower() in q]
+            if col:
+                avg_val = sensor_data_df[col[0]].mean()
+                return f"Average {col[0]} is {avg_val:.2f}."
+            else:
+                return "Column not found in sensor data."
+        except Exception:
+            return "Failed to compute average."
     else:
-        return "Ask about averages or anomalies in sensor data."
+        return "Sensor data agent can currently answer average or mean related queries."
 
-def maintenance_log_agent(query):
+def maintenance_log_agent(question):
     if maintenance_logs_df is None:
-        return "Maintenance logs data not loaded."
-    q = query.lower()
-    if "common issue" in q or "frequent issue" in q:
-        if 'issue' in maintenance_logs_df.columns:
-            common_issues = maintenance_logs_df['issue'].value_counts().head(3)
-            issues_str = ", ".join([f"{issue} ({count} times)" for issue, count in common_issues.items()])
-            return f"Top maintenance issues: {issues_str}."
+        return "Maintenance logs not loaded."
+    # Basic search for keywords and info (demo)
+    q = question.lower()
+    if "last repair" in q:
+        last_date = maintenance_logs_df['date'].max() if 'date' in maintenance_logs_df.columns else None
+        if last_date:
+            return f"The last maintenance was on {last_date}."
         else:
-            return "No 'issue' information found in maintenance logs."
-    elif "last maintenance" in q or "recent maintenance" in q:
-        if 'date' in maintenance_logs_df.columns:
-            last_maint = maintenance_logs_df.sort_values(by='date', ascending=False).head(3)
-            info = "\n".join([f"Machine {row['machine_id']} on {row['date']}: {row.get('issue','No issue')} - {row.get('action','No action')}" for _, row in last_maint.iterrows()])
-            return f"Recent maintenance activities:\n{info}"
-        else:
-            return "No 'date' column found in maintenance logs."
+            return "No date info in maintenance logs."
     else:
-        return "You can ask about common issues or recent maintenance."
+        return "Maintenance logs agent can answer about last repair or maintenance info."
 
-def failure_record_agent(query):
+def failure_record_agent(question):
     if failure_records_df is None:
-        return "Failure records data not loaded."
-    q = query.lower()
-    if "failure count" in q:
-        counts = failure_records_df['machine_id'].value_counts()
-        counts_str = ", ".join([f"{mid}: {cnt}" for mid, cnt in counts.items()])
-        return f"Failure counts per machine: {counts_str}."
-    elif "failure details" in q or "failure records" in q:
-        info = "\n".join([f"Machine {row['machine_id']} failed on {row.get('failure_date', 'N/A')} due to {row.get('failure_type', 'N/A')}" for _, row in failure_records_df.iterrows()])
-        return f"Failure records:\n{info}"
+        return "Failure records not loaded."
+    # Example check for failure count
+    q = question.lower()
+    if "failure count" in q or "number of failures" in q:
+        count = len(failure_records_df)
+        return f"Total failure records count: {count}."
     else:
-        return "Ask about failure counts or failure details."
+        return "Failure records agent can answer about failure counts or details."
 
-def rag_pdf_agent(query):
-    if faiss_index is None or not pdf_text_chunks or embed_model is None or rag_model is None:
-        return "PDF manual or required models not properly loaded."
-    if not query.strip():
-        return "Please enter a question about the PDF manual."
-    
-    query_embedding = embed_model.encode([query])
-    D, I = faiss_index.search(query_embedding, k=3)
-    retrieved_docs = [pdf_text_chunks[i] for i in I[0]]
-    context = " ".join(retrieved_docs)
-    prompt = f"Answer the question based on the context below:\nContext: {context}\n\nQuestion: {query}\nAnswer:"
+# === PDF Query Agent ===
+def pdf_query_agent(query, pdf_text):
+    if not pdf_text:
+        return "No PDF manual uploaded."
+    # Simple similarity or keyword search (basic demo)
+    paragraphs = re.split(r'\n+', pdf_text)
+    query_lower = query.lower()
+    for para in paragraphs:
+        if query_lower in para.lower():
+            return para
+    return "No relevant information found in the PDF manual."
 
-    try:
-        rag_response = rag_model(prompt, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
-        return rag_response
-    except Exception as e:
-        return f"Failed to generate answer: {e}"
+# === MAIN QUERY INPUT & RESPONSE ===
+st.header("Ask Your Queries")
 
-# ----------- UI Layout -----------
+# Query input about datasets and CNC/maintenance
+query_1 = st.text_area("Enter your question about sensor/maintenance/failure datasets or CNC machine:", height=150)
 
-st.header("Query about Sensor / Maintenance / Failure Data")
-query_1 = st.text_area("Enter your question about datasets (sensor, maintenance, failures):", height=150)
-
-if st.button("Get Dataset Response"):
-    if not query_1.strip():
-        st.warning("Please enter a query about the datasets.")
-    else:
-        q = query_1.lower()
-        if any(k in q for k in ["sensor", "anomaly", "threshold", "average", "mean", "temperature", "humidity", "vibration"]):
-            resp = sensor_data_agent(query_1)
-        elif any(k in q for k in ["maintenance", "issue", "action", "repair"]):
-            resp = maintenance_log_agent(query_1)
-        elif any(k in q for k in ["failure", "breakdown", "error"]):
-            resp = failure_record_agent(query_1)
+if query_1.strip():
+    q = query_1.lower()
+    if any(k in q for k in ["maintenance", "repair", "cutter", "bearing", "coolant", "cnc", "machine", "overheat"]):
+        # Detailed explanatory response from RAG model
+        if rag_model:
+            prompt = f"Explain in detail:\nQuestion: {query_1}\nAnswer:"
+            try:
+                response = rag_model(prompt, max_length=250, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+            except Exception:
+                response = "Sorry, failed to generate a detailed explanation."
         else:
-            resp = "Sorry, I couldn't understand your query. Please ask about sensor data, maintenance logs, or failure records."
-        st.markdown(f"**Answer:** {resp}")
-
-st.markdown("---")
-st.header("Query about Maintenance Manual PDF (RAG)")
-query_2 = st.text_area("Enter your question about the Maintenance Manual PDF:", height=150)
-
-if st.button("Get PDF Manual Response"):
-    if not query_2.strip():
-        st.warning("Please enter a query about the PDF manual.")
+            response = "RAG model not loaded, cannot generate detailed response."
+    elif any(k in q for k in ["sensor", "anomaly", "threshold", "average", "mean", "temperature", "humidity", "vibration"]):
+        response = sensor_data_agent(query_1)
+    elif any(k in q for k in ["issue", "action", "repair"]):
+        response = maintenance_log_agent(query_1)
+    elif any(k in q for k in ["failure", "breakdown", "error"]):
+        response = failure_record_agent(query_1)
     else:
-        resp = rag_pdf_agent(query_2)
-        st.markdown(f"**Answer:** {resp}")
+        response = "Sorry, I couldn't understand your query. Please ask about sensor data, maintenance logs, failure records, or CNC machine."
+
+    st.markdown(f"**Answer:** {response}")
+else:
+    st.info("Enter a query about datasets or CNC machine to get an answer.")
+
+# Query input specifically for PDF manual
+st.header("Ask Questions from PDF Manual")
+query_2 = st.text_area("Enter your question related to the PDF manual content:", key="pdf_query", height=150)
+
+if query_2.strip():
+    pdf_response = pdf_query_agent(query_2, pdf_text)
+    st.markdown(f"**PDF Manual Answer:** {pdf_response}")
+else:
+    st.info("Enter a question about the PDF manual.")
+
+# === End of app ===
