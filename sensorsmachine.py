@@ -17,23 +17,10 @@ sensor_data_file = st.sidebar.file_uploader("Sensor Data CSV", type=["csv"], key
 maintenance_logs_file = st.sidebar.file_uploader("Maintenance Logs CSV", type=["csv"], key="maintenance")
 failure_records_file = st.sidebar.file_uploader("Failure Records CSV", type=["csv"], key="failure")
 
-if not (sensor_data_file and maintenance_logs_file and failure_records_file):
-    st.sidebar.warning("📂 Please upload all three required data files to proceed.")
-    st.stop()
-
-# Read uploaded files
-sensor_data_df = pd.read_csv(sensor_data_file)
-maintenance_logs_df = pd.read_csv(maintenance_logs_file)
-failure_records_df = pd.read_csv(failure_records_file)
-
-DEVICE = 0 if torch.cuda.is_available() else -1
-rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-
 # ------------------- SIDEBAR -------------------
 st.sidebar.title("Navigation")
 section = st.sidebar.radio("Go to", [
-    "Sensor Dashboard",
+    # Removed "Sensor Dashboard"
     "Anomaly Detection",
     "Maintenance Logs",
     "Failure Reports",
@@ -41,14 +28,34 @@ section = st.sidebar.radio("Go to", [
     "RAG Q&A (PDF)"
 ])
 
-# ------------------- SENSOR DASHBOARD -------------------
-if section == "Sensor Dashboard":
-    st.header("📈 Sensor Data Overview")
-    st.dataframe(sensor_data_df.tail(20))
-    st.line_chart(sensor_data_df[['vibration', 'humidity', 'temperature']].tail(50))
+# Only enforce file uploads for sections other than RAG Q&A
+if section != "RAG Q&A (PDF)":
+    if not (sensor_data_file and maintenance_logs_file and failure_records_file):
+        st.sidebar.warning("📂 Please upload all three required data files to proceed.")
+        st.stop()
+
+# Read uploaded files if available (skip if missing but in RAG section)
+if sensor_data_file:
+    sensor_data_df = pd.read_csv(sensor_data_file)
+else:
+    sensor_data_df = pd.DataFrame()
+
+if maintenance_logs_file:
+    maintenance_logs_df = pd.read_csv(maintenance_logs_file)
+else:
+    maintenance_logs_df = pd.DataFrame()
+
+if failure_records_file:
+    failure_records_df = pd.read_csv(failure_records_file)
+else:
+    failure_records_df = pd.DataFrame()
+
+DEVICE = 0 if torch.cuda.is_available() else -1
+rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ------------------- ANOMALY DETECTION -------------------
-elif section == "Anomaly Detection":
+if section == "Anomaly Detection":
     st.header("🚨 Historical Anomaly Detection")
     threshold_vibration = st.slider("Vibration Threshold", 0.0, 5.0, 1.5)
     threshold_humidity = st.slider("Humidity Threshold", 0, 100, 80)
@@ -136,7 +143,6 @@ elif section == "RAG Q&A (PDF)":
         # Second input box with auto response
         user_query2 = st.text_input("Or try another question here (auto response):")
 
-        # Use session_state to avoid unnecessary re-computation and flickering
         if user_query2:
             if 'last_query' not in st.session_state or st.session_state.last_query != user_query2:
                 st.session_state.last_query = user_query2
