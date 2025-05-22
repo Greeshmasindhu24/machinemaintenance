@@ -7,6 +7,7 @@ from transformers import pipeline
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import base64
+import fitz  # PyMuPDF for PDF text extraction
 
 # Limit CPU threads to reduce memory use
 torch.set_num_threads(1)
@@ -135,6 +136,19 @@ if uploaded_file is not None:
     st.success(f"Uploaded file: {uploaded_file.name}")
     try:
         pdf_bytes = uploaded_file.read()
+
+        # Extract text using PyMuPDF
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        extracted_text = ""
+        for page in doc:
+            extracted_text += page.get_text()
+        doc.close()
+
+        # Display extracted text in a scrollable text area to avoid white space
+        st.markdown("#### 📑 Extracted Text from PDF")
+        st.text_area("", extracted_text, height=300)
+
+        # Display PDF preview inside iframe, no extra whitespace below
         pdf_display = base64.b64encode(pdf_bytes).decode("utf-8")
         pdf_display_html = f'''
             <iframe 
@@ -143,8 +157,9 @@ if uploaded_file is not None:
                 type="application/pdf">
             </iframe>'''
         st.markdown(pdf_display_html, unsafe_allow_html=True)
-    except Exception:
-        st.error("Cannot display PDF preview.")
+
+    except Exception as e:
+        st.error(f"Error extracting PDF text or displaying PDF: {e}")
 
 # ---------- Monthly Report ----------
 def generate_performance_report(downtime_reduction, cost_savings, efficiency_gain):
