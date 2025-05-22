@@ -109,8 +109,8 @@ elif section == "RAG Q&A (PDF)":
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
 
+        # First input box with button (existing)
         user_query = st.text_area("Ask a question about the PDF:")
-
         if st.button("Get Answer") and user_query:
             query_embedding = embed_model.encode([user_query])
             D, I = index.search(query_embedding, k=3)
@@ -125,5 +125,25 @@ elif section == "RAG Q&A (PDF)":
             except Exception as e:
                 st.error("❌ Error generating response.")
                 st.exception(e)
+
+        st.markdown("---")  # Separator
+
+        # Second input box with auto-response (new)
+        user_query2 = st.text_input("Or try another question here (auto response):")
+        if user_query2:
+            query_embedding2 = embed_model.encode([user_query2])
+            D2, I2 = index.search(query_embedding2, k=3)
+            retrieved_docs2 = [chunks[i] for i in I2[0]]
+            context2 = " ".join(retrieved_docs2)
+            prompt2 = f"Answer the question based on the context below:\nContext: {context2}\n\nQuestion: {user_query2}\nAnswer:"
+
+            try:
+                response2 = rag_model(prompt2, max_length=150, do_sample=True, top_p=0.9, temperature=0.7)[0]['generated_text']
+                st.success("🤖 Auto Answer:")
+                st.write(response2)
+            except Exception as e:
+                st.error("❌ Error generating auto response.")
+                st.exception(e)
+
     else:
         st.info("📤 Upload a PDF to enable question answering.")
