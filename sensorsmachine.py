@@ -13,10 +13,20 @@ st.set_page_config(page_title="CNC Predictive Maintenance", layout="wide")
 st.title("🛠️ CNC Predictive Maintenance using Vibration & Humidity Sensors")
 st.markdown("---")
 
-# Load Excel/CSV data
-sensor_data_df = pd.read_csv("/mnt/data/sensor_data.csv")
-maintenance_logs_df = pd.read_csv("/mnt/data/maintenance_logs.csv")
-failure_records_df = pd.read_csv("/mnt/data/failure_records.csv")
+# ------------------- UPLOAD DATA -------------------
+st.sidebar.title("Upload Data Files")
+sensor_data_file = st.sidebar.file_uploader("Sensor Data CSV", type=["csv"], key="sensor")
+maintenance_logs_file = st.sidebar.file_uploader("Maintenance Logs CSV", type=["csv"], key="maintenance")
+failure_records_file = st.sidebar.file_uploader("Failure Records CSV", type=["csv"], key="failure")
+
+if not (sensor_data_file and maintenance_logs_file and failure_records_file):
+    st.warning("📂 Please upload all three required data files to proceed.")
+    st.stop()
+
+# Read uploaded files
+sensor_data_df = pd.read_csv(sensor_data_file)
+maintenance_logs_df = pd.read_csv(maintenance_logs_file)
+failure_records_df = pd.read_csv(failure_records_file)
 
 DEVICE = 0 if torch.cuda.is_available() else -1
 rag_model = pipeline("text2text-generation", model="t5-base", device=DEVICE)
