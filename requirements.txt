@@ -1,6 +1,6 @@
 streamlit==1.26.0
 torch
-numpynumpy==1.24.4
+numpy==1.24.4
 pandas
 scikit-learn
 PyMuPDF
