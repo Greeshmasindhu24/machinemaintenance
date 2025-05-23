@@ -11,6 +11,16 @@ from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.metrics.pairwise import cosine_similarity
 
 # -----------------------------
+# Utility: Load Data Function
+# -----------------------------
+def load_sensor_data():
+    np.random.seed(42)
+    vibration = np.random.normal(0, 1, (1000,))
+    humidity = np.random.normal(50, 5, (1000,))
+    df = pd.DataFrame({"vibration": vibration, "humidity": humidity})
+    return df
+
+# -----------------------------
 # LSTM Autoencoder with PyTorch
 # -----------------------------
 class LSTMAutoencoder(nn.Module):
@@ -37,35 +47,63 @@ def preprocess_data(df, timesteps=10):
     return torch.tensor(sequences)
 
 # -----------------------------
-# Load sensor data (mocked for training)
+# Anomaly Detection Agent (hidden from UI)
 # -----------------------------
-def load_sensor_data():
-    np.random.seed(42)
-    vibration = np.random.normal(0, 1, (1000,))
-    humidity = np.random.normal(50, 5, (1000,))
-    df = pd.DataFrame({"vibration": vibration, "humidity": humidity})
-    return df
+def anomaly_detection_agent(data):
+    timesteps = 10
+    n_features = 2
+    hidden_dim = 64
+    sequence_data = preprocess_data(data, timesteps)
+
+    model_path = "torch_lstm_autoencoder.pt"
+    if not os.path.exists(model_path):
+        st.warning("Model not found. Please train and save the model first.")
+        return None
+
+    model = LSTMAutoencoder(input_dim=n_features, hidden_dim=hidden_dim, seq_len=timesteps)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+
+    with torch.no_grad():
+        reconstructed = model(sequence_data)
+        loss = torch.mean((sequence_data - reconstructed) ** 2, dim=(1, 2))
+
+    loss_np = loss.numpy()
+    threshold = np.percentile(loss_np, 95)
+    anomalies = loss_np > threshold
+
+    results = pd.DataFrame({
+        "reconstruction_error": loss_np,
+        "anomaly": anomalies
+    })
+    return results
 
 # -----------------------------
-# Multi-Agent RAG context (static)
+# Multi-Agent RAG System (Stub)
 # -----------------------------
-rag_context = [
-    "Regularly check vibration sensors for abnormal values.",
-    "Machine vibration can be caused by imbalance or misalignment.",
-    "Maintenance includes lubrication and tightening of bolts.",
-    "Replace worn out parts immediately to avoid damage.",
-    "Ensure the machine is on a stable surface to reduce vibration.",
-]
+def sensor_data_agent():
+    return load_sensor_data()
+
+def maintenance_scheduling_agent(anomalies):
+    if anomalies['anomaly'].sum() > 5:
+        return "Maintenance Required Soon"
+    return "No Immediate Maintenance Needed"
+
+def alert_notification_agent(status):
+    if status == "Maintenance Required Soon":
+        return "🔧 Alert: Schedule maintenance check immediately."
+    else:
+        return "✅ System is stable."
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("CNC Predictive Maintenance with LSTM Autoencoder & Multi-Agent RAG")
+st.title("CNC Predictive Maintenance with LSTM Autoencoder (PyTorch) & Multi-Agent RAG")
 
 # Train the model
 if st.button("Train and Save LSTM Autoencoder"):
     with st.spinner("Training LSTM Autoencoder..."):
-        data = load_sensor_data()
+        data = sensor_data_agent()
         timesteps = 10
         sequence_data = preprocess_data(data, timesteps)
 
@@ -93,7 +131,7 @@ if st.button("Train and Save LSTM Autoencoder"):
         st.success("Model trained and saved successfully!")
 
 # -----------------------------
-# PDF Manual Upload and Extraction
+# Manual PDF Upload + RAG Q&A
 # -----------------------------
 st.subheader("Upload Maintenance Manual (PDF)")
 manual = st.file_uploader("Choose a PDF file", type=["pdf"])
@@ -107,45 +145,40 @@ if manual is not None:
             manual_text += page.get_text()
         sentences = [s.strip() for s in manual_text.split(". ") if len(s.strip()) > 20]
 
-# -----------------------------
-# Ask question based on PDF manual
-# -----------------------------
-if sentences:
-    vectorizer_pdf = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(sentences)
-    st.subheader("Ask a Question Based on Manual:")
-    query_pdf = st.text_input("Your question about the PDF manual", key="pdf_query")
+    if sentences:
+        vectorizer = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(sentences)
+        st.subheader("Ask a Question Based on Manual:")
+        query_pdf = st.text_input("Your question about the PDF manual", key="pdf_query")
 
-    if query_pdf:
-        query_vec = vectorizer_pdf.transform([query_pdf])
-        sentence_vecs = vectorizer_pdf.transform(sentences)
-        similarities = cosine_similarity(query_vec, sentence_vecs).flatten()
-
-        top_n = 1
-        top_indices = np.argsort(similarities)[-top_n:][::-1]
-        answers = [sentences[i] for i in top_indices]
-
-        st.markdown("### 📘 Answers from Manual")
-        for i, ans in enumerate(answers, 1):
-            st.info(f"{i}. {ans}")
+        if query_pdf:
+            query_vec = vectorizer.transform([query_pdf])
+            sentence_vecs = vectorizer.transform(sentences)
+            similarities = cosine_similarity(query_vec, sentence_vecs).flatten()
+            top_idx = similarities.argmax()
+            answer = sentences[top_idx]
+            st.markdown("### 📘 Answer from Manual")
+            st.success(answer)
 
 # -----------------------------
-# Ask general maintenance question with combined RAG context + PDF sentences
+# Additional RAG Input Box (Stub)
 # -----------------------------
 st.subheader("Ask a General Maintenance Question (RAG)")
+rag_context = [
+    "Check machine regularly for vibration anomalies.",
+    "Keep humidity levels within the recommended range.",
+    "Regular maintenance reduces unexpected breakdowns.",
+    "Replace worn out parts promptly.",
+    "Ensure proper lubrication of all moving parts."
+]
+
+vectorizer_rag = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(rag_context)
+
 rag_query = st.text_input("Ask your general question", key="rag_query")
-
 if rag_query:
-    combined_context = rag_context + sentences
-    vectorizer_rag = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(combined_context)
-
     query_vec = vectorizer_rag.transform([rag_query])
-    context_vecs = vectorizer_rag.transform(combined_context)
+    context_vecs = vectorizer_rag.transform(rag_context)
     similarities = cosine_similarity(query_vec, context_vecs).flatten()
-
-    top_n = 1
-    top_indices = np.argsort(similarities)[-top_n:][::-1]
-    answers = [combined_context[i] for i in top_indices]
-
-    st.markdown("### 🤖 RAG Agent Responses")
-    for i, ans in enumerate(answers, 1):
-        st.info(f"{i}. {ans}")
+    top_idx = similarities.argmax()
+    rag_answer = rag_context[top_idx]
+    st.markdown("### 🤖 RAG Agent Response")
+    st.info(rag_answer)
