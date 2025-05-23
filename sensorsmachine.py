@@ -56,9 +56,18 @@ class DiagnosticAgent:
                 alerts.append(f"⚠️ {param.replace('_', ' ').title()} exceeds threshold ({value:.1f} > {self.thresholds[param]:.1f})")
         return alerts if alerts else ["✅ All parameters within normal ranges"]
 
+    def explain(self, query, sensor_data):
+        explanation = []
+        if "vibration" in query:
+            explanation.append(f"- Spindle Vibration: {sensor_data['spindle_vibration']:.2f} mm/s — Indicates imbalance, misalignment, or bearing issues.")
+        if "temperature" in query or "heat" in query:
+            explanation.append(f"- Axis Temperature: {sensor_data['axis_temp']:.2f}°C — High temperature may indicate lubrication issues or excess friction.")
+        if "cutting force" in query or "force" in query:
+            explanation.append(f"- Cutting Force: {sensor_data['cutting_force']:.2f} N — High force may result from tool wear, feed rate issues, or hard material.")
+        return "\n".join(explanation)
+
 @st.cache_resource
 def load_embedding_model():
-    """Load and cache the sentence embedding model"""
     try:
         model = SentenceTransformer("all-MiniLM-L6-v2", device='cpu')
         logger.info("Embedding model loaded successfully")
@@ -69,7 +78,6 @@ def load_embedding_model():
         raise
 
 def process_pdf(file):
-    """Extract text from uploaded PDF file"""
     try:
         pdf_reader = PdfReader(file)
         text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
@@ -81,11 +89,9 @@ def process_pdf(file):
         return ""
 
 def chunk_text(text, chunk_size=500):
-    """Split text into manageable chunks"""
     return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)] if text else []
 
 def semantic_search(query, embeddings, texts, top_k=3):
-    """Perform semantic search on embedded text"""
     try:
         query_emb = embed_model.encode(query, convert_to_tensor=True)
         cos_scores = torch.nn.functional.cosine_similarity(query_emb, embeddings)
@@ -96,7 +102,6 @@ def semantic_search(query, embeddings, texts, top_k=3):
         return []
 
 def generate_pdf_response(query, pdf_chunks, pdf_embeddings, maintenance_agent):
-    """Generate response based on PDF content"""
     if not pdf_chunks:
         return "No PDF manual loaded. Please upload a CNC machine manual first."
     
@@ -110,7 +115,6 @@ def generate_pdf_response(query, pdf_chunks, pdf_embeddings, maintenance_agent):
     return "\n\n".join(response)
 
 def generate_technical_response(query, diagnostic_agent):
-    """Generate technical diagnostic response"""
     sensor_data = {
         'spindle_vibration': np.random.uniform(1.5, 3.0),
         'axis_temp': np.random.uniform(40.0, 50.0),
@@ -119,16 +123,26 @@ def generate_technical_response(query, diagnostic_agent):
     
     response = ["📊 System Diagnostics:"]
     response.extend(diagnostic_agent.evaluate(sensor_data))
-    
+
+    response.append("\n🧠 Sensor Data Explanation:")
+    response.append(diagnostic_agent.explain(query.lower(), sensor_data))
+
     response.append("\n🛠️ Recommended Actions:")
-    query = query.lower()
     if "vibration" in query:
         response.append("- Check spindle bearings and balance")
         response.append("- Verify tool holder condition")
-    if "temperature" in query:
+    if "temperature" in query or "heat" in query:
         response.append("- Inspect coolant system and flow rate")
         response.append("- Check lubrication points")
-    
+    if "cutting force" in query or "force" in query:
+        response.append("- Sharpen or replace cutting tool")
+        response.append("- Optimize feed rate and cutting parameters")
+
+    response.append("\n✅ Preventive Tips:")
+    response.append("- Schedule regular lubrication and coolant checks.")
+    response.append("- Use condition monitoring sensors to detect anomalies early.")
+    response.append("- Train operators to recognize early signs of mechanical failure.")
+
     return "\n".join(response)
 
 # Initialize components
