@@ -1,199 +1,151 @@
-import os
+# app.py
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-from sentence_transformers import SentenceTransformer
-from PyPDF2 import PdfReader
-from dotenv import load_dotenv
-import logging
+from torch.utils.data import DataLoader, TensorDataset
+import os
+import fitz  # PyMuPDF
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
+from sklearn.metrics.pairwise import cosine_similarity
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# -----------------------------
+# LSTM Autoencoder with PyTorch
+# -----------------------------
+class LSTMAutoencoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, seq_len):
+        super(LSTMAutoencoder, self).__init__()
+        self.encoder = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.decoder = nn.LSTM(hidden_dim, input_dim, batch_first=True)
+        self.seq_len = seq_len
 
-# Configuration
-load_dotenv()
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU usage
-device = torch.device('cpu')
+    def forward(self, x):
+        _, (hidden, _) = self.encoder(x)
+        dec_input = hidden.repeat(self.seq_len, 1, 1).permute(1, 0, 2)
+        decoded, _ = self.decoder(dec_input)
+        return decoded
 
-# Set up Streamlit
-st.set_page_config(page_title="🔧 CNC Predictive Maintenance AI", layout="wide")
-st.title("CNC Machine Predictive Maintenance AI System")
+# -----------------------------
+# Preprocessing Function
+# -----------------------------
+def preprocess_data(df, timesteps=10):
+    data = df[['vibration', 'humidity']].values.astype(np.float32)
+    sequences = []
+    for i in range(len(data) - timesteps):
+        sequences.append(data[i:i+timesteps])
+    return torch.tensor(sequences)
 
-class MaintenanceAgent:
-    """Agent for maintenance knowledge and recommendations"""
-    def __init__(self):
-        self.knowledge_base = {
-            "vibration": "High vibration typically indicates bearing wear or misalignment. Check spindle bearings and motor couplings.",
-            "temperature": "Elevated temperatures suggest lubrication issues or excessive friction. Verify coolant flow and bearing grease.",
-            "accuracy": "Dimensional inaccuracies may result from ball screw wear or thermal expansion. Perform backlash compensation.",
-            "sound": "Unusual noises often precede bearing failure. Listen for grinding or clicking sounds during operation.",
-            "default": "This symptom requires further investigation. Recommend running full diagnostics."
-        }
-        
-    def analyze(self, symptom):
-        symptom = symptom.lower()
-        for key in self.knowledge_base:
-            if key in symptom:
-                return self.knowledge_base[key]
-        return self.knowledge_base["default"]
+# -----------------------------
+# Load sensor data (mocked for training)
+# -----------------------------
+def load_sensor_data():
+    np.random.seed(42)
+    vibration = np.random.normal(0, 1, (1000,))
+    humidity = np.random.normal(50, 5, (1000,))
+    df = pd.DataFrame({"vibration": vibration, "humidity": humidity})
+    return df
 
-class DiagnosticAgent:
-    """Agent for real-time diagnostics and threshold monitoring"""
-    def __init__(self):
-        self.thresholds = {
-            'spindle_vibration': 2.5,
-            'axis_temp': 45.0,
-            'cutting_force': 150.0
-        }
-    
-    def evaluate(self, sensor_data):
-        alerts = []
-        for param, value in sensor_data.items():
-            if param in self.thresholds and value > self.thresholds[param]:
-                alerts.append(f"⚠️ {param.replace('_', ' ').title()} exceeds threshold ({value:.1f} > {self.thresholds[param]:.1f})")
-        return alerts if alerts else ["✅ All parameters within normal ranges"]
+# -----------------------------
+# Multi-Agent RAG context (static)
+# -----------------------------
+rag_context = [
+    "Regularly check vibration sensors for abnormal values.",
+    "Machine vibration can be caused by imbalance or misalignment.",
+    "Maintenance includes lubrication and tightening of bolts.",
+    "Replace worn out parts immediately to avoid damage.",
+    "Ensure the machine is on a stable surface to reduce vibration.",
+]
 
-    def explain(self, query, sensor_data):
-        explanation = []
-        if "vibration" in query:
-            explanation.append(f"- Spindle Vibration: {sensor_data['spindle_vibration']:.2f} mm/s — Indicates imbalance, misalignment, or bearing issues.")
-        if "temperature" in query or "heat" in query:
-            explanation.append(f"- Axis Temperature: {sensor_data['axis_temp']:.2f}°C — High temperature may indicate lubrication issues or excess friction.")
-        if "cutting force" in query or "force" in query:
-            explanation.append(f"- Cutting Force: {sensor_data['cutting_force']:.2f} N — High force may result from tool wear, feed rate issues, or hard material.")
-        return "\n".join(explanation)
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.title("CNC Predictive Maintenance with LSTM Autoencoder & Multi-Agent RAG")
 
-@st.cache_resource
-def load_embedding_model():
-    try:
-        model = SentenceTransformer("all-MiniLM-L6-v2", device='cpu')
-        logger.info("Embedding model loaded successfully")
-        return model
-    except Exception as e:
-        logger.error(f"Error loading embedding model: {e}")
-        st.error("Failed to load AI model. Please check the logs.")
-        raise
+# Train the model
+if st.button("Train and Save LSTM Autoencoder"):
+    with st.spinner("Training LSTM Autoencoder..."):
+        data = load_sensor_data()
+        timesteps = 10
+        sequence_data = preprocess_data(data, timesteps)
 
-def process_pdf(file):
-    try:
-        pdf_reader = PdfReader(file)
-        text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
-        logger.info(f"Processed PDF with {len(text)} characters")
-        return text
-    except Exception as e:
-        logger.error(f"PDF processing error: {e}")
-        st.error(f"Error reading PDF: {str(e)}")
-        return ""
+        n_features = sequence_data.shape[2]
+        model = LSTMAutoencoder(input_dim=n_features, hidden_dim=64, seq_len=timesteps)
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        epochs = 10
+        batch_size = 32
 
-def chunk_text(text, chunk_size=500):
-    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)] if text else []
+        train_loader = DataLoader(TensorDataset(sequence_data, sequence_data), batch_size=batch_size, shuffle=True)
 
-def semantic_search(query, embeddings, texts, top_k=3):
-    try:
-        query_emb = embed_model.encode(query, convert_to_tensor=True)
-        cos_scores = torch.nn.functional.cosine_similarity(query_emb, embeddings)
-        top_results = torch.topk(cos_scores, k=top_k)
-        return [(texts[idx], score.item()) for score, idx in zip(top_results.values, top_results.indices)]
-    except Exception as e:
-        logger.error(f"Semantic search error: {e}")
-        return []
+        model.train()
+        for epoch in range(epochs):
+            total_loss = 0
+            for batch_x, _ in train_loader:
+                output = model(batch_x)
+                loss = criterion(output, batch_x)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
 
-def generate_pdf_response(query, pdf_chunks, pdf_embeddings, maintenance_agent):
-    if not pdf_chunks:
-        return "No PDF manual loaded. Please upload a CNC machine manual first."
-    
-    results = semantic_search(query, pdf_embeddings, pdf_chunks)
-    response = ["📄 Manual Excerpts:"]
-    for i, (text, score) in enumerate(results, 1):
-        response.append(f"{i}. {text.strip()[:200]}... (relevance: {score:.2f})")
-    
-    response.append("\n🔍 Maintenance Agent Analysis:")
-    response.append(maintenance_agent.analyze(query))
-    return "\n\n".join(response)
+        torch.save(model.state_dict(), "torch_lstm_autoencoder.pt")
+        st.success("Model trained and saved successfully!")
 
-def generate_technical_response(query, diagnostic_agent):
-    sensor_data = {
-        'spindle_vibration': np.random.uniform(1.5, 3.0),
-        'axis_temp': np.random.uniform(40.0, 50.0),
-        'cutting_force': np.random.uniform(120.0, 180.0)
-    }
-    
-    response = ["📊 System Diagnostics:"]
-    response.extend(diagnostic_agent.evaluate(sensor_data))
+# -----------------------------
+# PDF Manual Upload and Extraction
+# -----------------------------
+st.subheader("Upload Maintenance Manual (PDF)")
+manual = st.file_uploader("Choose a PDF file", type=["pdf"])
+manual_text = ""
+sentences = []
 
-    response.append("\n🧠 Sensor Data Explanation:")
-    response.append(diagnostic_agent.explain(query.lower(), sensor_data))
+if manual is not None:
+    with st.spinner("Extracting PDF text..."):
+        doc = fitz.open(stream=manual.read(), filetype="pdf")
+        for page in doc:
+            manual_text += page.get_text()
+        sentences = [s.strip() for s in manual_text.split(". ") if len(s.strip()) > 20]
 
-    response.append("\n🛠️ Recommended Actions:")
-    if "vibration" in query:
-        response.append("- Check spindle bearings and balance")
-        response.append("- Verify tool holder condition")
-    if "temperature" in query or "heat" in query:
-        response.append("- Inspect coolant system and flow rate")
-        response.append("- Check lubrication points")
-    if "cutting force" in query or "force" in query:
-        response.append("- Sharpen or replace cutting tool")
-        response.append("- Optimize feed rate and cutting parameters")
+# -----------------------------
+# Ask question based on PDF manual
+# -----------------------------
+if sentences:
+    vectorizer_pdf = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(sentences)
+    st.subheader("Ask a Question Based on Manual:")
+    query_pdf = st.text_input("Your question about the PDF manual", key="pdf_query")
 
-    response.append("\n✅ Preventive Tips:")
-    response.append("- Schedule regular lubrication and coolant checks.")
-    response.append("- Use condition monitoring sensors to detect anomalies early.")
-    response.append("- Train operators to recognize early signs of mechanical failure.")
+    if query_pdf:
+        query_vec = vectorizer_pdf.transform([query_pdf])
+        sentence_vecs = vectorizer_pdf.transform(sentences)
+        similarities = cosine_similarity(query_vec, sentence_vecs).flatten()
 
-    return "\n".join(response)
+        top_n = 1
+        top_indices = np.argsort(similarities)[-top_n:][::-1]
+        answers = [sentences[i] for i in top_indices]
 
-# Initialize components
-try:
-    embed_model = load_embedding_model()
-    maintenance_agent = MaintenanceAgent()
-    diagnostic_agent = DiagnosticAgent()
-except Exception as e:
-    st.error(f"Initialization error: {e}")
-    st.stop()
+        st.markdown("### 📘 Answers from Manual")
+        for i, ans in enumerate(answers, 1):
+            st.info(f"{i}. {ans}")
 
-# PDF Processing
-pdf_text = ""
-pdf_manual_file = st.file_uploader("📄 Upload CNC Machine Manual (PDF)", type=['pdf'])
+# -----------------------------
+# Ask general maintenance question with combined RAG context + PDF sentences
+# -----------------------------
+st.subheader("Ask a General Maintenance Question (RAG)")
+rag_query = st.text_input("Ask your general question", key="rag_query")
 
-if pdf_manual_file:
-    pdf_text = process_pdf(pdf_manual_file)
-    if pdf_text:
-        st.success("PDF manual loaded successfully!")
+if rag_query:
+    combined_context = rag_context + sentences
+    vectorizer_rag = TfidfVectorizer(stop_words=list(ENGLISH_STOP_WORDS)).fit(combined_context)
 
-pdf_chunks = chunk_text(pdf_text)
-pdf_embeddings = embed_model.encode(pdf_chunks, convert_to_tensor=True) if pdf_chunks else None
+    query_vec = vectorizer_rag.transform([rag_query])
+    context_vecs = vectorizer_rag.transform(combined_context)
+    similarities = cosine_similarity(query_vec, context_vecs).flatten()
 
-# Interface
-col1, col2 = st.columns(2)
+    top_n = 1
+    top_indices = np.argsort(similarities)[-top_n:][::-1]
+    answers = [combined_context[i] for i in top_indices]
 
-with col1:
-    st.header("📚 Manual Knowledge Query")
-    pdf_query = st.text_area("Ask about CNC machine maintenance from the manual:", height=100)
-    if st.button("Get Manual Insights"):
-        if pdf_query:
-            with st.spinner("Consulting manual and maintenance experts..."):
-                response = generate_pdf_response(pdf_query, pdf_chunks, pdf_embeddings, maintenance_agent)
-                st.markdown(f"**Response:**\n\n{response}")
-        else:
-            st.warning("Please enter a question about the CNC manual")
-
-with col2:
-    st.header("⚙️ Technical Diagnostics")
-    tech_query = st.text_area("Ask about machine performance or diagnostics:", height=100)
-    if st.button("Get Technical Analysis"):
-        if tech_query:
-            with st.spinner("Analyzing system data and diagnostics..."):
-                response = generate_technical_response(tech_query, diagnostic_agent)
-                st.markdown(f"**Response:**\n\n{response}")
-        else:
-            st.warning("Please enter a technical question")
-
-# System status
-st.sidebar.header("System Status")
-st.sidebar.success("🟢 Predictive models online")
-st.sidebar.info("🔵 Maintenance agent active")
-st.sidebar.info("🔵 Diagnostic agent active")
-st.sidebar.warning(f"📊 Embedded {len(pdf_chunks)} manual chunks" if pdf_chunks else "📊 No manual loaded")
+    st.markdown("### 🤖 RAG Agent Responses")
+    for i, ans in enumerate(answers, 1):
+        st.info(f"{i}. {ans}")
